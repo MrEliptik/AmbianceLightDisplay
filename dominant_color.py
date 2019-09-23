@@ -31,6 +31,10 @@ def worker(input_q, output_q):
             output_q.put(frame)
 
 def main():
+    ## FLAGS
+    # Full speed if -1
+    FIXED_FPS = 20
+
     #print("Creating queues..")
     input_q = Queue()
     output_q = Queue()
@@ -49,6 +53,8 @@ def main():
 
             # Get raw pixels from the screen, save it to a Numpy array
             im = np.array(sct.grab(sct.monitors[2]))
+
+            last_time_delay = time.time()
 
             h, w, _ = im.shape
 
@@ -117,13 +123,11 @@ def main():
             pool.join()
             '''
 
-            # Display fps on the image
-            cv.putText(im, "fps: {}".format(int(1 / (time.time() - last_time))), 
-                (0, 25), cv.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 
+            cv.putText(im, "delay (ms): {}".format(int(1 / (time.time() - last_time_delay))), 
+                (0, 50), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
                 3, lineType=cv.LINE_AA)
 
-            # Display the picture
-            cv.imshow("OpenCV/Numpy normal", im)
+            
 
             #colors = getDominantColor(im)
             #print(colors)
@@ -131,9 +135,25 @@ def main():
             print("fps: {}".format(1 / (time.time() - last_time)))
 
             # Press "q" to quit
-            if cv.waitKey(25) & 0xFF == ord("q"):
+            if cv.waitKey(1) & 0xFF == ord("q"):
                 cv.destroyAllWindows()
                 break
+
+            #print(time.time() - last_time, 1/FIXED_FPS)
+
+            while((time.time() - last_time) < (1/FIXED_FPS)):
+                print("sleep")
+                #sleep 1ms
+                time.sleep(0.010)
+
+            # Display fps on the image
+            cv.putText(im, "fps: {}".format(int(1 / (time.time() - last_time))), 
+                (0, 25), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
+                3, lineType=cv.LINE_AA)
+
+            # Display the picture
+            cv.imshow("OpenCV/Numpy normal", im)
+            
 
     '''
     print(type(im))

@@ -27,8 +27,8 @@ def worker(input_q, output_q):
         #print("> ===== in worker loop, frame ", frame_processed)
         frame = input_q.get()
         if (frame is not None):
-            
-            output_q.put(frame)
+            color = getDominantColor(frame)
+            output_q.put(color)
 
 def main():
     ## FLAGS
@@ -41,7 +41,7 @@ def main():
 
     #print('Spinning up workers..')
     # Spin up workers to parallelize workload
-    pool = Pool(16, worker, (input_q, output_q))
+    pool = Pool(8, worker, (input_q, output_q))
 
     # Take screenshot
     #im = pyautogui.screenshot() #pretty slow (100ms)
@@ -144,7 +144,7 @@ def main():
             while((time.time() - last_time) < (1/FIXED_FPS)):
                 print("sleep")
                 #sleep 1ms
-                time.sleep(0.010)
+                time.sleep((1/FIXED_FPS) - time.time())
 
             # Display fps on the image
             cv.putText(im, "fps: {}".format(int(1 / (time.time() - last_time))), 

@@ -25,15 +25,15 @@ def getDominantColor(image, num_clusters=3):
 def worker(input_q, output_q):
     while True:
         #print("> ===== in worker loop, frame ", frame_processed)
-        frame = input_q.get()
+        patch_id, frame = input_q.get()
         if (frame is not None):
-            
-            output_q.put(frame)
+            color = getDominantColor(frame)
+            output_q.put((patch_id, color))
 
 def main():
     ## FLAGS
     # Full speed if -1
-    FIXED_FPS = 20
+    FIXED_FPS = 2
 
     #print("Creating queues..")
     input_q = Queue()
@@ -74,6 +74,7 @@ def main():
 
             # size is == to rectangle's perimeter
             patches = [None]*PATCHES_NB
+            colors = [None]*PATCHES_NB
             #print('patch size: {}'.format(PATCHES_NB))
 
             #print('Starts processing screenshot')
@@ -103,7 +104,7 @@ def main():
                         #print(color)
                         #cv.rectangle(im, (x1,y1), (x2,y2), color, 3)
                         #patches.append(im[y1:y2, x1:x2, :])
-                        input_q.put(im[y1:y2, x1:x2, :])
+                        input_q.put((u, im[y1:y2, x1:x2, :]))
                         u += 1
                         #print('Input q full: {}'.format(input_q.empty()))
                         #print('Input q size: {}'.format(u))
@@ -112,25 +113,15 @@ def main():
             #while(k < PATCHES_NB and not output_q.empty()):
             while(k < PATCHES_NB): 
                 #print('Waiting for patches {}'.format(k))
-                patches[k] = output_q.get()
+                patch_id, patch = output_q.get()
+                colors[patch_id] = patch
                 k += 1
 
-            '''
-            pool = Pool(8)
-            # Create mapping for each image
-            colors = pool.map(getDominantColor, patches) 
-            pool.close() 
-            pool.join()
-            '''
+            #print(colors)
 
             cv.putText(im, "delay (ms): {}".format(int(1 / (time.time() - last_time_delay))), 
                 (0, 50), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
                 3, lineType=cv.LINE_AA)
-
-            
-
-            #colors = getDominantColor(im)
-            #print(colors)
 
             print("fps: {}".format(1 / (time.time() - last_time)))
 
@@ -139,12 +130,11 @@ def main():
                 cv.destroyAllWindows()
                 break
 
-            #print(time.time() - last_time, 1/FIXED_FPS)
-
             while((time.time() - last_time) < (1/FIXED_FPS)):
-                print("sleep")
-                #sleep 1ms
-                time.sleep(0.010)
+                #print("sleep")
+                #sleep the remaining time
+                #time.sleep((1/FIXED_FPS) - time.time())
+                time.sleep(0.01)
 
             # Display fps on the image
             cv.putText(im, "fps: {}".format(int(1 / (time.time() - last_time))), 
@@ -153,29 +143,6 @@ def main():
 
             # Display the picture
             cv.imshow("OpenCV/Numpy normal", im)
-            
-
-    '''
-    print(type(im))
-
-    im = np.array(im)
-
-    h, w, _ = im.shape
-    print(h, w)
-
-    im = cv.resize(im, (int(h/4), int(w/4)), cv.INTER_LINEAR)
-    h, w, _ = im.shape
-    print(h, w)
-
-    colors = getDominantColor(im)
-    print(colors)
-
-    cv.imshow("screen", im)
-    cv.waitKey(0)
-    
-    # Save the image
-    #pic.save('Screenshot.png') 
-    '''
 
 if __name__ == "__main__":
     main()

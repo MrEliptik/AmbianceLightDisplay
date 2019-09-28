@@ -30,10 +30,15 @@ def worker(input_q, output_q):
             color = getDominantColor(frame)
             output_q.put((patch_id, color))
 
-def grabber(output_q):
+def grabber(input_q, output_q):
     while True:
-        # Get raw pixels from the screen, save it to a Numpy array
-        im = np.array(sct.grab(sct.monitors[monitor['id']])) # ~35ms on 4k display, 20ms 1080p
+        ready = input_q.get()
+        if ready is not None:
+            # Get raw pixels from the screen, save it to a Numpy array
+            im = np.array(sct.grab(sct.monitors[monitor['id']])) # ~35ms on 4k display, 20ms 1080p
+            h, w, _ = im.shape
+            im = cv.resize(im, (int(w/6), int(h/6)), cv.INTER_LINEAR)
+            output_q.put(im)
 
 def main(display=False, debug="none"):
     debug = False
@@ -49,21 +54,24 @@ def main(display=False, debug="none"):
     # Full speed if -1
     FIXED_FPS = 20
     NB_MONITOR = 1
-    MONITOR_1 = {'id':1, 'w':2560, 'h':1080, 'col':6, 'row':4,'active':True}
-    MONITOR_2 = {'id':2, 'w':3840, 'h':2160, 'col':8, 'row':4, 'active':False}
-    MONITORS = [MONITOR_1, MONITOR_2]
-
+    #MONITOR_1 = {'id':1, 'w':2560, 'h':1080, 'col':6, 'row':4,'active':True}
+    #MONITOR_2 = {'id':2, 'w':3840, 'h':2160, 'col':8, 'row':4, 'active':False}
+    #MONITORS = [MONITOR_1, MONITOR_2]
+    MONITOR_1 = {'id':1, 'w':1920, 'h':1080, 'col':6, 'row':4,'active':True}
+    MONITORS = [MONITOR_1]
 
     if debug:
         print("Creating queues..")
     input_q = Queue()
     output_q = Queue()
+    grabber_in_q = Queue()
+    grabber_out_q = Queue()
 
     if debug:
         print('Spinning up workers..')
     # Spin up workers to parallelize workload
     pool = Pool(8, worker, (input_q, output_q))
-    #grabber_pool = Pool(1, grabber, (input_q, output_q))
+    grabber_pool = Pool(1, grabber, (grabber_in_q, grabber_out_q))
     
     # Take screenshot
     with mss.mss() as sct:
@@ -85,15 +93,14 @@ def main(display=False, debug="none"):
                 colors = [None]*PATCHES_NB
                 
                 # Get raw pixels from the screen, save it to a Numpy array
-                im = np.array(sct.grab(sct.monitors[monitor['id']])) # ~35s on 4k display, 20ms 1080p
+                #im = np.array(sct.grab(sct.monitors[monitor['id']])) # ~35s on 4k display, 20ms 1080p
+                im = grabber_out_q.get()
+                
                 if timing:
                     print("Screen time: {} ms".format((time.time() - last_screen)*1000))
 
                 last_time_delay = time.time()
 
-                h, w, _ = im.shape
-
-                im = cv.resize(im, (int(w/6), int(h/6)), cv.INTER_LINEAR)
 
                 h, w, _ = im.shape
                 if debug:

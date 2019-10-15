@@ -7,6 +7,17 @@ import mss
 from PIL import Image
 import time
 from multiprocessing import Queue, Pool
+import sys
+
+## FLAGS
+# Full speed if -1
+FIXED_FPS = 5
+NB_MONITOR = 1
+MONITOR_1 = {'id':1, 'w':2560, 'h':1080, 'col':6, 'row':4,'active':True}
+MONITOR_2 = {'id':2, 'w':3840, 'h':2160, 'col':8, 'row':4, 'active':False}
+MONITORS = [MONITOR_1, MONITOR_2]
+#MONITOR_1 = {'id':1, 'w':1920, 'h':1080, 'col':6, 'row':4,'active':True}
+#MONITORS = [MONITOR_1]
  
 def getDominantColor(image, num_clusters=3):
     shape = image.shape
@@ -24,158 +35,194 @@ def getDominantColor(image, num_clusters=3):
 
 def worker(input_q, output_q):
     while True:
-        #print("> ===== in worker loop, frame ", frame_processed)
-        frame = input_q.get()
+        patch_id, frame = input_q.get()
         if (frame is not None):
             color = getDominantColor(frame)
-            output_q.put(color)
+            output_q.put((patch_id, color))
 
-def main():
-    ## FLAGS
-    # Full speed if -1
-    FIXED_FPS = 20
+def grabber(input_q, output_q):
+    with mss.mss() as sct:
+        while True:
+            for monitor in MONITORS:
+                if not monitor['active']:
+                    continue
+                ready = input_q.get()
+                if ready is not None:
+                    # Get raw pixels from the screen, save it to a Numpy array
+                    im = np.array(sct.grab(sct.monitors[monitor['id']]))[:,:,:3] # ~35ms on 4k display, 20ms 1080p
+                    h, w, _ = im.shape
+                    im = cv.resize(im, (int(w/6), int(h/6)), cv.INTER_LINEAR)
+                    output_q.put(im)
 
-    #print("Creating queues..")
+def main(display=False, debug="none"):
+    if debug == "debug":
+        debug = True
+        timing = True
+    elif debug == "timing":
+        timing = True
+        debug = False
+    else:
+        timing = False
+        debug = False
+
+    if debug:
+        print("Creating queues..")
     input_q = Queue()
     output_q = Queue()
+    grabber_in_q = Queue()
+    grabber_out_q = Queue()
 
-    #print('Spinning up workers..')
+    if debug:
+        print('Spinning up workers..')
     # Spin up workers to parallelize workload
     pool = Pool(8, worker, (input_q, output_q))
+    grabber_pool = Pool(1, grabber, (grabber_in_q, grabber_out_q))
 
-    # Take screenshot
-    #im = pyautogui.screenshot() #pretty slow (100ms)
-    with mss.mss() as sct:
-        # Get rid of the first, as it represents the "All in One" monitor:
-        while "Screen capturing":
-            #print('Starts grabbing..')
-            last_time = time.time()
+    # Initial capture
+    grabber_in_q.put("go")
 
+    # Get rid of the first, as it represents the "All in One" monitor:
+    while "Screen capturing":
+        last_time = time.time()
+
+        if timing:
+            last_screen = time.time()
+
+        for monitor in MONITORS:
+            if not monitor['active']:
+                continue
+
+            PATCHES_NB = ((monitor['col']+monitor['row'])*2) - 4
+            patches = [None]*PATCHES_NB
+            colors = [None]*PATCHES_NB
+            
             # Get raw pixels from the screen, save it to a Numpy array
-            im = np.array(sct.grab(sct.monitors[2]))
+            #im = np.array(sct.grab(sct.monitors[monitor['id']])) # ~35s on 4k display, 20ms 1080p
+            im = grabber_out_q.get()
+            
+            if timing:
+                print("Screen time: {} ms".format((time.time() - last_screen)*1000))
 
             last_time_delay = time.time()
 
             h, w, _ = im.shape
+            if debug:
+                print('h: {}, w: {}'.format(h, w))
 
-            im = cv.resize(im, (int(w/6), int(h/6)), cv.INTER_LINEAR)
+            kernel_col_size = h//monitor['row']
+            kernel_row_size = w//monitor['col']
 
-            h, w, _ = im.shape
+            if timing:
+                calc_time = time.time()
+                patch_extract_time = time.time()
+            if debug:
+                print('kernel size: {},{}'.format(kernel_col_size, kernel_row_size))
+                print('patch size: {}'.format(PATCHES_NB))
+                print('Starts processing screenshot')
+                l = 0
+            _id = 0 
 
-            COL_SCAN = 8
-            ROW_SCAN = 4
+            # Processing is starting, we can
+            # grab another frame
+            grabber_in_q.put('go')
+            for i in range(monitor['row']):
+                for j in range(monitor['col']):
+                    x1 = (j*kernel_row_size)
+                    x2 = (kernel_row_size+x1)
+                    y1 = (i*kernel_col_size) 
+                    y2 = (kernel_col_size+y1) 
 
-            PATCHES_NB = ((COL_SCAN+ROW_SCAN)*2) - 4
+                    if debug:
+                        print('Patch: {}'.format(l))
+                        print('Coords..: {}, {}, {}, {}'.format(x1,y1,x2,y2))
+                        l += 1
+                    if x1 == 0 or y1 == 0 or x2 == w or y2 == h:
+                        if debug:
+                            print('Id: {}'.format(_id))
+                        input_q.put((_id, im[y1:y2, x1:x2, :]))
+                        _id += 1
+                        if debug:
+                            print('Input q full: {}'.format(input_q.empty()))
+                            print('Input q size: {}'.format(input_q.qsize()))
+                            print('Out q size: {}'.format(output_q.qsize()))
+            if timing:
+                print('Patch extraction: {} ms'.format((time.time() - patch_extract_time)*1000))
 
-            kernel_col_size = h//ROW_SCAN
-            kernel_row_size = w//COL_SCAN
+            '''
+            print('Queue content: ')
+            for n in list(input_q.queue):
+                print('     {}'.format(n))
+            '''
 
-            #print('kernel size: {},{}'.format(kernel_col_size, kernel_row_size))
+            if timing:
+                last_process_finished = time.time()   
+            k = 0
+            while(k < PATCHES_NB): 
+                if debug:
+                    print('Waiting for patches {}'.format(k))
+                patch_id, patch = output_q.get()
+                if debug:
+                    print(patch_id, patch)
+                if timing:
+                    print('Process {} finished: {} ms'.format(patch_id, (time.time() - last_process_finished)*1000))
+                colors[patch_id] = patch
+                k += 1
+            
+            if timing:
+                print('Last process finished: {} ms'.format((time.time() - last_process_finished)*1000))
+                print('calc time: {} ms'.format((time.time() - calc_time)*1000))
 
-            # size is == to rectangle's perimeter
-            patches = [None]*PATCHES_NB
-            #print('patch size: {}'.format(PATCHES_NB))
-
-            #print('Starts processing screenshot')
-
-            u = 0 
-            l = 0 
-            for i in range(ROW_SCAN):
-                for j in range(COL_SCAN):
-                    if j == 0:
-                        x1 = (j*kernel_row_size)
-                        x2 = kernel_row_size+x1
-                    else:
+            if display:
+                _id = 0
+                for i in range(monitor['row']):
+                    for j in range(monitor['col']):
                         x1 = (j*kernel_row_size)
                         x2 = (kernel_row_size+x1)
-                    if i == 0:
-                        y1 = i*kernel_col_size
-                        y2 = kernel_col_size+y1
-                    else:
                         y1 = (i*kernel_col_size) 
                         y2 = (kernel_col_size+y1) 
 
-                    l += 1
-                    #print('Patches: {}'.format(l))
-                    #print('Coords..: {}, {}, {}, {}'.format(x1,y1,x2,y2))
-                    if x1 == 0 or y1 == 0 or x2 == w or y2 == h:
-                        #color = getDominantColor(im[y1:y2, x1:x2, :])
-                        #print(color)
-                        #cv.rectangle(im, (x1,y1), (x2,y2), color, 3)
-                        #patches.append(im[y1:y2, x1:x2, :])
-                        input_q.put(im[y1:y2, x1:x2, :])
-                        u += 1
-                        #print('Input q full: {}'.format(input_q.empty()))
-                        #print('Input q size: {}'.format(u))
-                        
-            k = 0
-            #while(k < PATCHES_NB and not output_q.empty()):
-            while(k < PATCHES_NB): 
-                #print('Waiting for patches {}'.format(k))
-                patches[k] = output_q.get()
-                k += 1
-
-            '''
-            pool = Pool(8)
-            # Create mapping for each image
-            colors = pool.map(getDominantColor, patches) 
-            pool.close() 
-            pool.join()
-            '''
-
-            cv.putText(im, "delay (ms): {}".format(int(1 / (time.time() - last_time_delay))), 
-                (0, 50), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
-                3, lineType=cv.LINE_AA)
-
-            
-
-            #colors = getDominantColor(im)
-            #print(colors)
+                        if x1 == 0 or y1 == 0 or x2 == w or y2 == h:
+                            try:
+                                color = colors[_id]
+                                if debug:
+                                    print(_id, color)
+                                # bgr to rgb color
+                                cv.rectangle(im, (x1,y1), (x2,y2), (color[1], color[0], color[2]))
+                                cv.putText(im, str(_id), (x1, int((y1 + y2)/2)), 
+                                    cv.FONT_HERSHEY_SIMPLEX, 1.0, (color[1], color[0], color[2]), 1, lineType=cv.LINE_AA)
+                            except Exception as e:
+                                print(e)
+                            _id += 1
+                
+                cv.putText(im, "delay (ms): {}".format(int(1 / (time.time() - last_time_delay))), 
+                    (0, 50), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
+                    3, lineType=cv.LINE_AA)
+                
 
             print("fps: {}".format(1 / (time.time() - last_time)))
 
             # Press "q" to quit
             if cv.waitKey(1) & 0xFF == ord("q"):
                 cv.destroyAllWindows()
-                break
-
-            #print(time.time() - last_time, 1/FIXED_FPS)
+                sys.exit()
 
             while((time.time() - last_time) < (1/FIXED_FPS)):
-                print("sleep")
-                #sleep 1ms
-                time.sleep((1/FIXED_FPS) - time.time())
+                if debug:    
+                    print("sleep")
+                #sleep the remaining time
+                #time.sleep((1/FIXED_FPS) - time.time())
+                time.sleep(0.01)
 
-            # Display fps on the image
-            cv.putText(im, "fps: {}".format(int(1 / (time.time() - last_time))), 
-                (0, 25), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
-                3, lineType=cv.LINE_AA)
+            if display:
+                # Display fps on the image
+                '''
+                cv.putText(im, "fps: {}".format(int(1 / (time.time() - last_time))), 
+                    (0, 25), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
+                    3, lineType=cv.LINE_AA)
+                '''
 
-            # Display the picture
-            cv.imshow("OpenCV/Numpy normal", im)
-            
-
-    '''
-    print(type(im))
-
-    im = np.array(im)
-
-    h, w, _ = im.shape
-    print(h, w)
-
-    im = cv.resize(im, (int(h/4), int(w/4)), cv.INTER_LINEAR)
-    h, w, _ = im.shape
-    print(h, w)
-
-    colors = getDominantColor(im)
-    print(colors)
-
-    cv.imshow("screen", im)
-    cv.waitKey(0)
-    
-    # Save the image
-    #pic.save('Screenshot.png') 
-    '''
+                # Display the picture
+                cv.imshow("OpenCV/Numpy normal", im)
 
 if __name__ == "__main__":
-    main()
+    main(display=True, debug="none")

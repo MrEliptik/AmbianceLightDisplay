@@ -49,7 +49,7 @@ def grabber(input_q, output_q):
                 ready = input_q.get()
                 if ready is not None:
                     # Get raw pixels from the screen, save it to a Numpy array
-                    im = np.array(sct.grab(sct.monitors[monitor['id']])) # ~35ms on 4k display, 20ms 1080p
+                    im = np.array(sct.grab(sct.monitors[monitor['id']]))[:,:,:3] # ~35ms on 4k display, 20ms 1080p
                     h, w, _ = im.shape
                     im = cv.resize(im, (int(w/6), int(h/6)), cv.INTER_LINEAR)
                     output_q.put(im)
@@ -83,8 +83,6 @@ def main(display=False, debug="none"):
 
     # Get rid of the first, as it represents the "All in One" monitor:
     while "Screen capturing":
-        if debug:
-            print('Starts grabbing..')
         last_time = time.time()
 
         if timing:
@@ -106,7 +104,6 @@ def main(display=False, debug="none"):
                 print("Screen time: {} ms".format((time.time() - last_screen)*1000))
 
             last_time_delay = time.time()
-
 
             h, w, _ = im.shape
             if debug:
@@ -136,17 +133,26 @@ def main(display=False, debug="none"):
                     y2 = (kernel_col_size+y1) 
 
                     if debug:
-                        print('Patches: {}'.format(l))
+                        print('Patch: {}'.format(l))
                         print('Coords..: {}, {}, {}, {}'.format(x1,y1,x2,y2))
                         l += 1
                     if x1 == 0 or y1 == 0 or x2 == w or y2 == h:
+                        if debug:
+                            print('Id: {}'.format(_id))
                         input_q.put((_id, im[y1:y2, x1:x2, :]))
                         _id += 1
                         if debug:
                             print('Input q full: {}'.format(input_q.empty()))
-                            print('Input q size: {}'.format(_id))
+                            print('Input q size: {}'.format(input_q.qsize()))
+                            print('Out q size: {}'.format(output_q.qsize()))
             if timing:
                 print('Patch extraction: {} ms'.format((time.time() - patch_extract_time)*1000))
+
+            '''
+            print('Queue content: ')
+            for n in list(input_q.queue):
+                print('     {}'.format(n))
+            '''
 
             if timing:
                 last_process_finished = time.time()   
@@ -155,6 +161,8 @@ def main(display=False, debug="none"):
                 if debug:
                     print('Waiting for patches {}'.format(k))
                 patch_id, patch = output_q.get()
+                if debug:
+                    print(patch_id, patch)
                 if timing:
                     print('Process {} finished: {} ms'.format(patch_id, (time.time() - last_process_finished)*1000))
                 colors[patch_id] = patch
@@ -163,9 +171,6 @@ def main(display=False, debug="none"):
             if timing:
                 print('Last process finished: {} ms'.format((time.time() - last_process_finished)*1000))
                 print('calc time: {} ms'.format((time.time() - calc_time)*1000))
-
-            if debug:
-                print(colors)
 
             if display:
                 _id = 0
@@ -177,13 +182,22 @@ def main(display=False, debug="none"):
                         y2 = (kernel_col_size+y1) 
 
                         if x1 == 0 or y1 == 0 or x2 == w or y2 == h:
-                            input_q.put((_id, im[y1:y2, x1:x2, :]))
-                            cv.rectangle(im, (x1,y1), (x2,y2), colors[_id])
+                            try:
+                                color = colors[_id]
+                                if debug:
+                                    print(_id, color)
+                                # bgr to rgb color
+                                cv.rectangle(im, (x1,y1), (x2,y2), (color[1], color[0], color[2]))
+                                cv.putText(im, str(_id), (x1, int((y1 + y2)/2)), 
+                                    cv.FONT_HERSHEY_SIMPLEX, 1.0, (color[1], color[0], color[2]), 1, lineType=cv.LINE_AA)
+                            except Exception as e:
+                                print(e)
                             _id += 1
-                    
+                
                 cv.putText(im, "delay (ms): {}".format(int(1 / (time.time() - last_time_delay))), 
                     (0, 50), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
                     3, lineType=cv.LINE_AA)
+                
 
             print("fps: {}".format(1 / (time.time() - last_time)))
 
@@ -201,9 +215,11 @@ def main(display=False, debug="none"):
 
             if display:
                 # Display fps on the image
+                '''
                 cv.putText(im, "fps: {}".format(int(1 / (time.time() - last_time))), 
                     (0, 25), cv.FONT_HERSHEY_SIMPLEX, 1.0, (200, 100, 170), 
                     3, lineType=cv.LINE_AA)
+                '''
 
                 # Display the picture
                 cv.imshow("OpenCV/Numpy normal", im)

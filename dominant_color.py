@@ -1,10 +1,8 @@
-import pyautogui
 import numpy as np
 import scipy
 import scipy.cluster
 import cv2 as cv
 import mss
-from PIL import Image
 import time
 from multiprocessing import Queue, Pool
 import sys
@@ -147,14 +145,6 @@ def main(display=False, debug="none"):
                             print('Out q size: {}'.format(output_q.qsize()))
             if timing:
                 print('Patch extraction: {} ms'.format((time.time() - patch_extract_time)*1000))
-
-            '''
-            print('Queue content: ')
-            for n in list(input_q.queue):
-                print('     {}'.format(n))
-            '''
-
-            if timing:
                 last_process_finished = time.time()   
             k = 0
             while(k < PATCHES_NB): 

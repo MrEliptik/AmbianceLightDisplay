@@ -148,11 +148,6 @@ def main(display=False, debug="none"):
             if timing:
                 print('Patch extraction: {} ms'.format((time.time() - patch_extract_time)*1000))
 
-            '''
-            print('Queue content: ')
-            for n in list(input_q.queue):
-                print('     {}'.format(n))
-            '''
 
             if timing:
                 last_process_finished = time.time()   

@@ -6,6 +6,7 @@ import mss
 import time
 from multiprocessing import Queue, Pool
 import sys
+from http_req import sendRGBvalues
 
 ## FLAGS
 # Full speed if -1
@@ -213,6 +214,10 @@ def main(display=False, debug="none"):
 
                 # Display the picture
                 cv.imshow("OpenCV/Numpy normal", im)
+
+            # Send rgb values
+            sendRGBvalues('http://192.168.0.50', colors)
+            return
 
 if __name__ == "__main__":
     main(display=True, debug="none")
